@@ -1,37 +1,61 @@
-import argparse
+import pyaudio
+import wave
 import json
 import os
 from sarvam_api import transcribe_audio
 from gemini_api import elaborate_symptoms
-from rag import rag_system
+
+def record_audio(duration=5, filename="temp_audio.wav"):
+    chunk = 1024
+    format = pyaudio.paInt16
+    channels = 1
+    rate = 44100
+
+    p = pyaudio.PyAudio()
+    stream = p.open(format=format,
+                    channels=channels,
+                    rate=rate,
+                    input=True,
+                    frames_per_buffer=chunk)
+
+    print("Recording...")
+    frames = []
+
+    for i in range(0, int(rate / chunk * duration)):
+        data = stream.read(chunk)
+        frames.append(data)
+
+    print("Recording finished.")
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+
+    wf = wave.open(filename, 'wb')
+    wf.setnchannels(channels)
+    wf.setsampwidth(p.get_sample_size(format))
+    wf.setframerate(rate)
+    wf.writeframes(b''.join(frames))
+    wf.close()
 
 def main():
-    parser = argparse.ArgumentParser(description="Voice-based Symptom Reporting")
-    parser.add_argument("audio_file", help="Path to the audio file")
-    parser.add_argument("patient_id", help="Patient ID")
-
-    args = parser.parse_args()
-
-    if not os.path.exists(args.audio_file):
-        print(json.dumps({"error": "Audio file not found"}))
-        return
+    # Record live audio
+    audio_file = "temp_audio.wav"
+    record_audio(duration=5, filename=audio_file)
 
     try:
         # Transcribe audio to English text
-        transcribed_text = transcribe_audio(args.audio_file)
+        transcribed_text = transcribe_audio(audio_file)
 
-        # Retrieve patient past history from RAG
-        past_history = rag_system.retrieve_history(args.patient_id, transcribed_text)
-
-        # Use Gemini to elaborate symptoms, specialist, severity
-        result = elaborate_symptoms(transcribed_text, past_history)
-
-        # Store current symptoms and response in RAG
-        rag_system.add_entry(args.patient_id, transcribed_text, result.get("elaborated_symptoms", ""))
+        # Use Gemini to elaborate symptoms, specialist, severity (no history for now)
+        result = elaborate_symptoms(transcribed_text)
 
         print(json.dumps(result))
     except Exception as e:
         print(json.dumps({"error": str(e)}))
+    finally:
+        # Clean up
+        if os.path.exists(audio_file):
+            os.remove(audio_file)
 
 if __name__ == "__main__":
     main()
